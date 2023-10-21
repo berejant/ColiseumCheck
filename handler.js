@@ -228,7 +228,7 @@ module.exports.check = async (event) => {
         if (isArrayEqual(previousAvailableDates, newAvailableDates)) {
             console.log('No changes');
             await sendHealthCheck(SIGNAL_SUCCESS, 'No changes');
-            return;
+
         } else {
             console.log('Changes detected');
 
@@ -238,22 +238,34 @@ module.exports.check = async (event) => {
 
             await sendHealthCheck(SIGNAL_SUCCESS, newAvailableDates);
         }
+
+        return {
+            statusCode: 200,
+            body: JSON.stringify(
+                {
+                    message: `Available dates: ${newAvailableDates.join(', ')}`,
+                },
+                null,
+                2
+            ),
+        };
+
     } catch (e) {
         console.log(e);
         await sendHealthCheck(SIGNAL_FAIL, e.message);
+
+        return {
+            statusCode: 500,
+            body: JSON.stringify(
+                {
+                    message: e.message,
+                },
+                null,
+                2
+            ),
+        };
     }
 
-  return {
-    statusCode: 200,
-    body: JSON.stringify(
-      {
-        message: 'Go Serverless v1.0! Your function executed successfully!',
-        input: event,
-      },
-      null,
-      2
-    ),
-  };
 
   // Use this code if you don't use the http event with the LAMBDA-PROXY integration
   // return { message: 'Go Serverless v1.0! Your function executed successfully!', event };
