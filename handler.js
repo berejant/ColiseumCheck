@@ -1,5 +1,8 @@
 'use strict';
 
+const aws = require('aws-sdk');
+const S3 = new aws.S3();
+
 const htmlparser2 = require("htmlparser2");
 const solveChallenge = require("./solver/main");
 const headers = {
@@ -172,28 +175,24 @@ const sendToTelegram = async (message) => {
 }
 
 const readStateFromS3 = async () => {
-    const s3 = new AWS.S3();
-
     const params = {
         Bucket: BUCKET,
         Key: `state.json`,
     };
 
-    const data = await s3.getObject(params).promise();
+    const data = await S3.getObject(params).promise();
 
     return JSON.parse(data.Body.toString());
 }
 
 const saveStateToS3 = async (data) => {
-    const s3 = new AWS.S3();
-
     const params = {
         Bucket: BUCKET,
         Key: `state.json`,
         Body: JSON.stringify(data),
     };
 
-    await s3.putObject(params).promise();
+    await S3.putObject(params).promise();
 }
 
 const isArrayEqual = (arr1, arr2) => {
@@ -259,5 +258,3 @@ module.exports.check = async (event) => {
   // Use this code if you don't use the http event with the LAMBDA-PROXY integration
   // return { message: 'Go Serverless v1.0! Your function executed successfully!', event };
 };
-
-module.exports.check();
