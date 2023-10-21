@@ -20,7 +20,10 @@ const headers = {
     "x-requested-with": "XMLHttpRequest"
 }
 
-const URL = 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&month=11&year=2023&lang=en&_=1697919875669';
+const URLs = {
+  'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&month=11&year=2023&lang=en',
+  'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&month=11&year=2023&lang=en',
+}
 
 const SIGNAL_START = 1;
 const SIGNAL_FAIL = 2;
@@ -30,6 +33,8 @@ const SIGNAL_SUCCESS = 3;
 const BUCKET = process.env.BUCKET;
 
 const catchChallengeScript = async () => {
+    let URL = Object.values(URLs)[0];
+
     let response = await fetch(URL, {
         method: "GET",
         credentials: "omit",
@@ -68,19 +73,12 @@ const catchChallengeScript = async () => {
 }
 
 
-const catchDates = async (cookies) => {
-    let cookieString = '';
-    for (const cookieName in cookies) {
-        cookieString += `${cookieName}=${cookies[cookieName]};`
-    }
-
+const catchDates = async (URL) => {
     let response = await fetch(URL, {
         method: "GET",
         credentials: "omit",
         cache: "no-cache",
-        headers: Object.assign({
-            "Cookie": cookieString,
-        }, headers),
+        headers: headers,
     })
 
     const datesAvailableStatus = {};
@@ -99,7 +97,7 @@ const catchDates = async (cookies) => {
 
     parser.parseComplete(await response.text());
 
-    if (!Object.keys(datesAvailableStatus).length < 14) {
+    if (Object.keys(datesAvailableStatus).length < 14) {
         throw new Error('No dates available');
     }
 
@@ -204,6 +202,10 @@ const saveStateToS3 = async (data) => {
 }
 
 const isArrayEqual = (arr1, arr2) => {
+    if (!Array.isArray(arr1) || !Array.isArray(arr2)) {
+        return false;
+    }
+
     if (arr1.length !== arr2.length) {
         return false;
     }
@@ -221,37 +223,47 @@ module.exports.check = async (event) => {
     sendHealthCheck(SIGNAL_START).then();
 
     try {
-        const previousAvailableDates = await readStateFromS3() || [];
+        const previousAvailableDates = await readStateFromS3() || {};
 
         let scriptContent = await catchChallengeScript();
         const cookies = solveChallenge(scriptContent)
-
         console.log(cookies);
 
-        let datesAvailableStatus = await catchDates(cookies);
+        headers.Cookie = '';
+        for (const cookieName in cookies) {
+            headers.Cookie += `${cookieName}=${cookies[cookieName]};`
+        }
 
-        const newAvailableDates = filterAvailableDates(datesAvailableStatus);
+        let hasChanges = false;
+        const newAvailableDates = {};
+        for (const ticketType in URLs) {
+            let datesAvailableStatus = await catchDates(URLs[ticketType]);
 
-        if (isArrayEqual(previousAvailableDates, newAvailableDates)) {
-            console.log('No changes');
+            newAvailableDates[ticketType] = filterAvailableDates(datesAvailableStatus);
+
+            if (isArrayEqual(previousAvailableDates[ticketType], newAvailableDates[ticketType])) {
+                console.log('No changes');
+                await sendHealthCheck(SIGNAL_SUCCESS, 'No changes');
+
+            } else {
+                hasChanges = true;
+                console.log('Changes detected');
+
+                await sendToTelegram(`${ticketType} ticket - available dates: ${newAvailableDates[ticketType].join(', ')}`);
+            }
+        }
+
+        if (!hasChanges) {
             await sendHealthCheck(SIGNAL_SUCCESS, 'No changes');
-
         } else {
-            console.log('Changes detected');
-
-            await saveStateToS3(newAvailableDates);
-
-            await sendToTelegram(`Available dates: ${newAvailableDates.join(', ')}`);
-
             await sendHealthCheck(SIGNAL_SUCCESS, newAvailableDates);
         }
 
+        await saveStateToS3(newAvailableDates);
+
         return {
             statusCode: 200,
-            body: JSON.stringify(
-                {
-                    message: `Available dates: ${newAvailableDates.join(', ')}`,
-                },
+            body: JSON.stringify(newAvailableDates,
                 null,
                 2
             ),
@@ -273,7 +285,4 @@ module.exports.check = async (event) => {
         };
     }
 
-
-  // Use this code if you don't use the http event with the LAMBDA-PROXY integration
-  // return { message: 'Go Serverless v1.0! Your function executed successfully!', event };
 };

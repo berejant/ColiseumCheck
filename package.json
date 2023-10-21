@@ -3,6 +3,8 @@
     "@babel/core": "^7.23.0",
     "@babel/generator": "^7.23.0",
     "@babel/parser": "^7.23.0",
+    "@babel/preset-react": "^7.22.15",
+    "@babel/preset-typescript": "^7.23.0",
     "@babel/traverse": "^7.23.0",
     "aws-sdk": "^2.1478.0",
     "htmlparser2": "^9.0.0"
