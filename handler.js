@@ -2,9 +2,11 @@
 
 const aws = require('aws-sdk');
 const S3 = new aws.S3();
+const fs = require('fs');
 
 const htmlparser2 = require("htmlparser2");
 const solveChallenge = require("./solver/main");
+const {has} = require("@babel/traverse/lib/path/introspection");
 const headers = {
     "authority": "ecm.coopculture.it",
     "accept": "text/html, */*; q=0.01",
@@ -69,6 +71,10 @@ const catchChallengeScript = async () => {
 
     parser.parseComplete(htmlContent);
 
+    if (scriptContent.length < 100) {
+        throw new Error('Script not found');
+    }
+
     return scriptContent;
 }
 
@@ -81,38 +87,32 @@ const catchDates = async (URL) => {
         headers: headers,
     })
 
-    const datesAvailableStatus = {};
+    const availableDatesList = [];
+
+    let capturedDateCount = 0;
 
     const parser = new htmlparser2.Parser({
         onopentag: function(name, attribs){
-            if (name === 'div') {
+            if (name === 'div' && attribs.class && attribs['data-date']) {
                 const classList = (attribs.class || "").split(' ');
                 if (classList.includes("day-number")) {
-                    const date = attribs['data-date'];
-                    datesAvailableStatus[date] = classList.includes("available");
+                    capturedDateCount++;
+                    if (classList.includes("available")) {
+                        availableDatesList.push(attribs['data-date'])
+                    }
                 }
             }
         },
     });
 
     parser.parseComplete(await response.text());
-
-    if (Object.keys(datesAvailableStatus).length < 14) {
+    if (capturedDateCount < 14) {
         throw new Error('No dates available');
     }
 
-    return datesAvailableStatus;
+    return availableDatesList;
 }
 
-const filterAvailableDates = (dates) => {
-    const availableDates = [];
-    for (const date in dates) {
-        if (dates[date]) {
-            availableDates.push(date);
-        }
-    }
-    return availableDates;
-}
 
 const sendHealthCheck = async (signal, postData) => {
     let signalString = '';
@@ -184,7 +184,7 @@ const readStateFromS3 = async () => {
         return JSON.parse(data.Body.toString());
     } catch (e) {
         if (e.code === 'NoSuchKey') {
-            return null;
+            return {};
         }
 
         throw e;
@@ -219,51 +219,108 @@ const isArrayEqual = (arr1, arr2) => {
     return true;
 }
 
+const COOKIE_FILE_PATH = '/tmp/cookies.json';
+const loadCookiesFromFile = () => {
+    if (!fs.existsSync(COOKIE_FILE_PATH)) {
+        return {};
+    }
+
+    const { birthtime } = fs.statSync(COOKIE_FILE_PATH)
+    const now = new Date()
+    if ((now - birthtime) > 1E3 * 60 * 60) { // 1 hour
+        return {};
+    }
+    console.log('Cookie file exists ' + birthtime)
+
+    return JSON.parse(fs.readFileSync(COOKIE_FILE_PATH, 'utf8'));
+}
+
+const saveCookiesToFile = (cookies) => {
+    fs.writeFileSync(COOKIE_FILE_PATH, JSON.stringify(cookies));
+}
+
+const isCookiesValid = (cookies) => !(!cookies || !cookies.octofence_jslc || !cookies.octofence_jslc_fp);
+
+const prepareCookieAndSolveChallenge = async () => {
+    let cookies = loadCookiesFromFile();
+
+    if (!isCookiesValid(cookies)) {
+        let scriptContent;
+        for (let i = 2; i >= 0; i--) {
+            try {
+                scriptContent = await catchChallengeScript();
+                cookies = solveChallenge(scriptContent)
+                console.log(cookies)
+                if (!isCookiesValid(cookies)) {
+                    throw new Error('Invalid solving');
+                }
+
+                break;
+            } catch (e) {
+                console.log(e);
+                if (i === 0) {
+                    throw e;
+                }
+            }
+        }
+    }
+
+    saveCookiesToFile(cookies);
+
+    headers.Cookie = '';
+    for (const cookieName in cookies) {
+        headers.Cookie += `${cookieName}=${cookies[cookieName]};`
+    }
+
+}
+
+const checkTypeDateAvailable = async (type, previousAvailablePerType) => {
+    if (!URLs[type]) {
+        throw new Error('Unknown type');
+    }
+
+    const newAvailablePerType = await catchDates(URLs[type]);
+
+    if (isArrayEqual(previousAvailablePerType, newAvailablePerType)) {
+        console.log('No changes');
+    } else {
+        newAvailablePerType.hasChanges = true;
+        console.log('Changes detected');
+
+        await sendToTelegram(`${type} ticket - available dates: ${newAvailablePerType.join(', ')}`);
+    }
+
+    return newAvailablePerType;
+}
+
 module.exports.check = async (event) => {
-    sendHealthCheck(SIGNAL_START).then();
-
     try {
-        const previousAvailableDates = await readStateFromS3() || {};
+        const [previousAvailableDates] = await Promise.all([
+            readStateFromS3(),
+            sendHealthCheck(SIGNAL_START),
+            prepareCookieAndSolveChallenge(),
+        ]);
 
-        let scriptContent = await catchChallengeScript();
-        const cookies = solveChallenge(scriptContent)
-        console.log(cookies);
+        const newAvailableDates = {};
 
-        headers.Cookie = '';
-        for (const cookieName in cookies) {
-            headers.Cookie += `${cookieName}=${cookies[cookieName]};`
+        for (const ticketType in URLs) {
+            newAvailableDates[ticketType] = checkTypeDateAvailable(ticketType, previousAvailableDates[ticketType])
         }
 
         let hasChanges = false;
-        const newAvailableDates = {};
-        for (const ticketType in URLs) {
-            let datesAvailableStatus = await catchDates(URLs[ticketType]);
-
-            newAvailableDates[ticketType] = filterAvailableDates(datesAvailableStatus);
-
-            if (isArrayEqual(previousAvailableDates[ticketType], newAvailableDates[ticketType])) {
-                console.log('No changes');
-            } else {
-                hasChanges = true;
-                console.log('Changes detected');
-
-                await sendToTelegram(`${ticketType} ticket - available dates: ${newAvailableDates[ticketType].join(', ')}`);
-            }
+        for (const ticketType in newAvailableDates) {
+            newAvailableDates[ticketType] = await newAvailableDates[ticketType];
+            hasChanges = hasChanges || newAvailableDates[ticketType].hasChanges || false;
         }
 
-        if (!hasChanges) {
-            await sendHealthCheck(SIGNAL_SUCCESS, {
-                message: 'No changes',
+        console.log('Saving state, changes: ', hasChanges)
+        await Promise.all([
+            saveStateToS3(newAvailableDates),
+            sendHealthCheck(SIGNAL_SUCCESS, {
+                message: hasChanges ? 'Changes detected' : 'No changes',
                 newAvailableDates: newAvailableDates,
-            });
-        } else {
-            await sendHealthCheck(SIGNAL_SUCCESS, {
-                message: 'Changes detected',
-                newAvailableDates: newAvailableDates,
-            });
-        }
-
-        await saveStateToS3(newAvailableDates);
+            }),
+        ])
 
         return {
             statusCode: 200,
