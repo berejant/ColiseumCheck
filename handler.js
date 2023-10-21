@@ -17,7 +17,7 @@ const headers = {
     "x-requested-with": "XMLHttpRequest"
 }
 
-const URL = 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=490E25D6-2465-ED3A-6A13-016ED583FB68&month=11&year=2023&lang=en&_=1697784291404';
+const URL = 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&month=11&year=2023&lang=en&_=1697919875669';
 
 const SIGNAL_START = 1;
 const SIGNAL_FAIL = 2;
