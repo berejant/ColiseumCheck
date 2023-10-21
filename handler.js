@@ -22,6 +22,10 @@ const URL = 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.ge
 const SIGNAL_START = 1;
 const SIGNAL_FAIL = 2;
 const SIGNAL_SUCCESS = 3;
+
+
+const BUCKET = process.env.BUCKET;
+
 const catchChallengeScript = async () => {
     let response = await fetch(URL, {
         method: "GET",
@@ -76,7 +80,7 @@ const catchDates = async (cookies) => {
         }, headers),
     })
 
-    const datesAvailable = {};
+    const datesAvailableStatus = {};
 
     const parser = new htmlparser2.Parser({
         onopentag: function(name, attribs){
@@ -84,7 +88,7 @@ const catchDates = async (cookies) => {
                 const classList = (attribs.class || "").split(' ');
                 if (classList.includes("day-number")) {
                     const date = attribs['data-date'];
-                    datesAvailable[date] = classList.includes("available");
+                    datesAvailableStatus[date] = classList.includes("available");
                 }
             }
         },
@@ -92,7 +96,11 @@ const catchDates = async (cookies) => {
 
     parser.parseComplete(await response.text());
 
-    return datesAvailable;
+    if (!Object.keys(datesAvailableStatus).length < 14) {
+        throw new Error('No dates available');
+    }
+
+    return datesAvailableStatus;
 }
 
 const filterAvailableDates = (dates) => {
@@ -163,25 +171,74 @@ const sendToTelegram = async (message) => {
     }
 }
 
+const readStateFromS3 = async () => {
+    const s3 = new AWS.S3();
+
+    const params = {
+        Bucket: BUCKET,
+        Key: `state.json`,
+    };
+
+    const data = await s3.getObject(params).promise();
+
+    return JSON.parse(data.Body.toString());
+}
+
+const saveStateToS3 = async (data) => {
+    const s3 = new AWS.S3();
+
+    const params = {
+        Bucket: BUCKET,
+        Key: `state.json`,
+        Body: JSON.stringify(data),
+    };
+
+    await s3.putObject(params).promise();
+}
+
+const isArrayEqual = (arr1, arr2) => {
+    if (arr1.length !== arr2.length) {
+        return false;
+    }
+
+    for (const i in arr1) {
+        if (arr1[i] !== arr2[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 module.exports.check = async (event) => {
 
     sendHealthCheck(SIGNAL_START).then();
 
     try {
+        const previousAvailableDates = await readStateFromS3();
+
         let scriptContent = await catchChallengeScript();
         const cookies = solveChallenge(scriptContent)
 
         console.log(cookies);
 
-        let dates = await catchDates(cookies);
+        let datesAvailableStatus = await catchDates(cookies);
 
-        const availableDates = filterAvailableDates(dates);
-        console.log(availableDates);
+        const newAvailableDates = filterAvailableDates(datesAvailableStatus);
 
-        await sendToTelegram(`Available dates: ${availableDates.join(', ')}`);
+        if (isArrayEqual(previousAvailableDates, newAvailableDates)) {
+            console.log('No changes');
+            await sendHealthCheck(SIGNAL_SUCCESS, 'No changes');
+            return;
+        } else {
+            console.log('Changes detected');
 
-        await sendHealthCheck(SIGNAL_SUCCESS, availableDates);
+            await saveStateToS3(newAvailableDates);
 
+            await sendToTelegram(`Available dates: ${newAvailableDates.join(', ')}`);
+
+            await sendHealthCheck(SIGNAL_SUCCESS, newAvailableDates);
+        }
     } catch (e) {
         console.log(e);
         await sendHealthCheck(SIGNAL_FAIL, e.message);
