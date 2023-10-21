@@ -29,7 +29,7 @@ provider:
   name: aws
   runtime: nodejs18.x
   architecture: arm64
-  memorySize: 128
+  memorySize: 256
 
 package:
   individually: true
