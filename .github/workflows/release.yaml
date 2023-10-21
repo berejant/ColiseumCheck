@@ -5,6 +5,10 @@ on:
   push:
     branches: ['main']
 
+concurrency:
+  group: ci-cd
+  cancel-in-progress: false
+
 jobs:
   test:
     name: Deploy
