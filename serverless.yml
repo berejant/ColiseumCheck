@@ -77,6 +77,7 @@ functions:
     events:
       - schedule: rate(3 minutes)
 
+    role: UploadRole
 #    Define function environment variables here
     environment:
       TELEGRAM_BOT_TOKEN: ${env:TELEGRAM_BOT_TOKEN}
