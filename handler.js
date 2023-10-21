@@ -175,14 +175,22 @@ const sendToTelegram = async (message) => {
 }
 
 const readStateFromS3 = async () => {
-    const params = {
-        Bucket: BUCKET,
-        Key: `state.json`,
-    };
+    try {
+        const params = {
+            Bucket: BUCKET,
+            Key: `state.json`,
+        };
 
-    const data = await S3.getObject(params).promise();
+        const data = await S3.getObject(params).promise();
 
-    return JSON.parse(data.Body.toString());
+        return JSON.parse(data.Body.toString());
+    } catch (e) {
+        if (e.code === 'NoSuchKey') {
+            return null;
+        }
+
+        throw e;
+    }
 }
 
 const saveStateToS3 = async (data) => {
@@ -210,11 +218,10 @@ const isArrayEqual = (arr1, arr2) => {
 }
 
 module.exports.check = async (event) => {
-
     sendHealthCheck(SIGNAL_START).then();
 
     try {
-        const previousAvailableDates = await readStateFromS3();
+        const previousAvailableDates = await readStateFromS3() || [];
 
         let scriptContent = await catchChallengeScript();
         const cookies = solveChallenge(scriptContent)

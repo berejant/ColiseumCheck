@@ -31,6 +31,28 @@ provider:
   architecture: arm64
   memorySize: 256
 
+  iam:
+    role:
+      statements:
+        - Effect: 'Allow'
+          Action:
+            - 's3:ListBucket'
+          Resource:
+            Fn::Join:
+              - ''
+              - - 'arn:aws:s3:::'
+                - Ref: StateBucket
+        - Effect: 'Allow'
+          Action:
+            - 's3:PutObject'
+            - 's3:GetObject'
+          Resource:
+            Fn::Join:
+              - ''
+              - - 'arn:aws:s3:::'
+                - Ref: StateBucket
+                - '/*'
+
 package:
   individually: true
 
@@ -77,7 +99,6 @@ functions:
     events:
       - schedule: rate(3 minutes)
 
-    role: UploadRole
 #    Define function environment variables here
     environment:
       TELEGRAM_BOT_TOKEN: ${env:TELEGRAM_BOT_TOKEN}
@@ -92,41 +113,6 @@ resources:
       Type: AWS::S3::Bucket
       Properties:
         BucketName: coliseum-state-bucket
-
-    UploadRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service:
-                  - lambda.amazonaws.com
-              Action: sts:AssumeRole
-        Policies:
-          - PolicyName: upload-policy
-            PolicyDocument:
-              Version: "2012-10-17"
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - s3:PutObject
-                    - s3:PutObjectAcl
-                    - s3:GetObject
-                  Resource:
-                    !Sub
-                    - "arn:aws:s3:::${BucketName}/*"
-                    - { BucketName: !Ref StateBucket }
-                - Effect: Allow
-                  Action:
-                    - logs:CreateLogGroup
-                    - logs:CreateLogStream
-                    - logs:PutLogEvents
-                  Resource:
-                    Fn::Sub:
-                      - arn:aws:logs:${Region}:${AccountId}:log-group:/aws/lambda/*:*:*
-                      - { Region: !Ref AWS::Region, AccountId: !Ref AWS::AccountId }
 
 #  Outputs:
 #     NewOutput:
