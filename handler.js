@@ -243,8 +243,6 @@ module.exports.check = async (event) => {
 
             if (isArrayEqual(previousAvailableDates[ticketType], newAvailableDates[ticketType])) {
                 console.log('No changes');
-                await sendHealthCheck(SIGNAL_SUCCESS, 'No changes');
-
             } else {
                 hasChanges = true;
                 console.log('Changes detected');
@@ -254,9 +252,15 @@ module.exports.check = async (event) => {
         }
 
         if (!hasChanges) {
-            await sendHealthCheck(SIGNAL_SUCCESS, 'No changes');
+            await sendHealthCheck(SIGNAL_SUCCESS, {
+                message: 'No changes',
+                newAvailableDates: newAvailableDates,
+            });
         } else {
-            await sendHealthCheck(SIGNAL_SUCCESS, newAvailableDates);
+            await sendHealthCheck(SIGNAL_SUCCESS, {
+                message: 'Changes detected',
+                newAvailableDates: newAvailableDates,
+            });
         }
 
         await saveStateToS3(newAvailableDates);
