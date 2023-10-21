@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main']
+
+jobs:
+  test:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+       - uses: actions/checkout@v3
+       - name: Use Node.js 18.x
+         uses: actions/setup-node@v3
+         with:
+           node-version: 18.x
+
+       - name: Cache dependencies
+         uses: actions/cache@v3
+         with:
+           path: ~/.npm
+           key: npm-${{ hashFiles('package-lock.json') }}
+           restore-keys: npm-
+
+       - name: Install node packages
+         run: npm ci --no-audit
+
+       - name: serverless deploy
+         run: npx serverless deploy
+         env:
+           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+           AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
