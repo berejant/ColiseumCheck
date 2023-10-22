@@ -47,31 +47,42 @@ const saveHtmlToS3 = async (name, data) => {
     return filename;
 }
 
-const fetchWithTimeout = async (URL) => {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 5000);
+const fetchWithTimeoutAndRetry = async (URL) => {
+    let controller;
+    let id;
+    for (let i = 2; i >= 0; i--) {
+        try {
+            controller = new AbortController();
+            id = setTimeout(() => controller.abort(), 3000);
 
-    let response = await fetch(URL, {
-        signal: controller.signal,
-        method: "GET",
-        credentials: "omit",
-        cache: "no-cache",
-        headers: headers,
-    })
-    clearTimeout(id);
+            let response = await fetch(URL, {
+                signal: controller.signal,
+                method: "GET",
+                credentials: "omit",
+                cache: "no-cache",
+                headers: headers,
+            })
+            clearTimeout(id);
 
-    return response;
+            return response;
+        } catch (e) {
+            console.log('Fetch error: ' + e.message);
+            if (i === 0) {
+                throw e;
+            }
+        }
+    }
 }
 
 const fetchWithSolveChallenge = async (URL) => {
-    let response = await fetchWithTimeout(URL);
+    let response = await fetchWithTimeoutAndRetry(URL);
 
     if (response.headers.get('X-Octofence-Js-Function') === 'forwarded') {
         return response;
     }
 
     await resolveChallengeAndKeepCookieSingleton(response);
-    return fetchWithTimeout(URL);
+    return fetchWithTimeoutAndRetry(URL);
 }
 
 
