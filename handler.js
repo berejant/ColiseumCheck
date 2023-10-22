@@ -49,7 +49,7 @@ const saveHtmlToS3 = async (name, data) => {
 
 const fetchWithTimeout = async (URL) => {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 3000);
+    const id = setTimeout(() => controller.abort(), 5000);
 
     let response = await fetch(URL, {
         signal: controller.signal,
