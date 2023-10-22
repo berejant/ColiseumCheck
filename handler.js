@@ -51,12 +51,17 @@ const saveHtmlToS3 = async (name, data) => {
 const catchChallengeScript = async () => {
     let URL = Object.values(URLs)[0];
 
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 3000);
+
     let response = await fetch(URL, {
+        signal: controller.signal,
         method: "GET",
         credentials: "omit",
         cache: "no-cache",
         headers: headers,
     })
+    clearTimeout(id);
 
     let htmlContent = await response.text()
     let isScriptStarted = false;
@@ -95,12 +100,17 @@ const catchChallengeScript = async () => {
 
 
 const catchDates = async (URL) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 3000);
+
     let response = await fetch(URL, {
+        signal: controller.signal,
         method: "GET",
         credentials: "omit",
         cache: "no-cache",
         headers: headers,
     })
+    clearTimeout(id);
 
     const availableDatesList = [];
 
@@ -266,6 +276,7 @@ const prepareCookieAndSolveChallenge = async () => {
         for (let i = 2; i >= 0; i--) {
             try {
                 scriptContent = await catchChallengeScript();
+                console.log("Solving challenge. Script length: " + scriptContent.length)
                 cookies = solveChallenge(scriptContent)
                 console.log(cookies)
                 if (!isCookiesValid(cookies)) {
