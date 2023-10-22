@@ -6,7 +6,18 @@ const fs = require('fs');
 
 const htmlparser2 = require("htmlparser2");
 const solveChallenge = require("./solver/main");
-const {has} = require("@babel/traverse/lib/path/introspection");
+
+const SIGNAL_START = 1;
+const SIGNAL_FAIL = 2;
+const SIGNAL_SUCCESS = 3;
+
+const BUCKET = process.env.BUCKET;
+
+const URLs = {
+    'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&month=11&year=2023&lang=en',
+    'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&month=11&year=2023&lang=en',
+}
+
 const headers = {
     "authority": "ecm.coopculture.it",
     "accept": "text/html, */*; q=0.01",
@@ -22,18 +33,6 @@ const headers = {
     "x-requested-with": "XMLHttpRequest"
 }
 
-const URLs = {
-  'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&month=11&year=2023&lang=en',
-  'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&month=11&year=2023&lang=en',
-}
-
-const SIGNAL_START = 1;
-const SIGNAL_FAIL = 2;
-const SIGNAL_SUCCESS = 3;
-
-
-const BUCKET = process.env.BUCKET;
-
 const saveHtmlToS3 = async (name, data) => {
     const filename = `${(new Date).toISOString()}_${name}.html`;
 
@@ -48,9 +47,7 @@ const saveHtmlToS3 = async (name, data) => {
     return filename;
 }
 
-const catchChallengeScript = async () => {
-    let URL = Object.values(URLs)[0];
-
+const fetchWithTimeout = async (URL) => {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 3000);
 
@@ -63,21 +60,67 @@ const catchChallengeScript = async () => {
     })
     clearTimeout(id);
 
-    let octofenceJsFunction = response.headers.get('X-Octofence-Js-Function');
-    console.log('X-Octofence-Js-Function: ' + octofenceJsFunction)
+    return response;
+}
 
-    if (octofenceJsFunction === 'forwarded') {
-        console.log('Passed without challenge');
-        return true;
+const fetchWithSolveChallenge = async (URL) => {
+    let response = await fetchWithTimeout(URL);
+
+    if (response.headers.get('X-Octofence-Js-Function') === 'forwarded') {
+        return response;
     }
 
+    await resolveChallengeAndKeepCookieSingleton(response);
+    return fetchWithTimeout(URL);
+}
+
+
+const resolveChallengeAndKeepCookie = async (response) => {
+    let scriptContent = await extractScriptFromResponse(response);
+    let cookies;
+    for (let i = 2; i >= 0; i--) {
+        console.log("Solving challenge. Script length: " + scriptContent.length)
+        cookies = solveChallenge(scriptContent)
+        console.log(cookies)
+
+        if (isCookiesValid(cookies)) {
+            break;
+        }
+    }
+
+    saveCookiesToFile(cookies);
+    setCookieHeader(cookies);
+}
+
+let lastSolvingChallengePromise = null;
+const resolveChallengeAndKeepCookieSingleton = (response) => {
+    if (!lastSolvingChallengePromise) {
+        lastSolvingChallengePromise = resolveChallengeAndKeepCookie(response)
+        lastSolvingChallengePromise.finally(() => {
+            setTimeout(() => {
+                lastSolvingChallengePromise = null;
+            }, 2000)
+        });
+    }
+
+    return lastSolvingChallengePromise;
+}
+
+const setCookieHeader = (cookies) => {
+    headers.Cookie = '';
+    for (const cookieName in cookies) {
+        headers.Cookie += `${cookieName}=${cookies[cookieName]};`
+    }
+}
+
+const extractScriptFromResponse = async (response) => {
     let htmlContent = await response.text()
     let isScriptStarted = false;
 
     let scriptContent = '';
 
     const parser = new htmlparser2.Parser({
-        onopentag: function(name){
+        onopentag: function(name) {
             if (name === 'script' && scriptContent === '') {
                 isScriptStarted = true;
             }
@@ -108,31 +151,38 @@ const catchChallengeScript = async () => {
 
 
 const catchDates = async (URL) => {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 3000);
-
-    let response = await fetch(URL, {
-        signal: controller.signal,
-        method: "GET",
-        credentials: "omit",
-        cache: "no-cache",
-        headers: headers,
-    })
-    clearTimeout(id);
+    let response = await fetchWithSolveChallenge(URL);
 
     const availableDatesList = [];
-
     let capturedDateCount = 0;
+    const parseDateDiv = (name, attribs) => {
+        if (name !== 'div') {
+            return null;
+        }
+
+        if (!attribs['data-date']) {
+            return null;
+
+        }
+        const classList = (attribs.class || "").split(' ');
+
+        if (!classList.includes("day-number")) {
+            return null;
+        }
+
+        return {
+            date: attribs['data-date'],
+            available: classList.includes("available"),
+        }
+    }
 
     const parser = new htmlparser2.Parser({
-        onopentag: function(name, attribs){
-            if (name === 'div' && attribs.class && attribs['data-date']) {
-                const classList = (attribs.class || "").split(' ');
-                if (classList.includes("day-number")) {
-                    capturedDateCount++;
-                    if (classList.includes("available")) {
-                        availableDatesList.push(attribs['data-date'])
-                    }
+        onopentag: function(name, attribs) {
+            let dateDivData = parseDateDiv(name, attribs);
+            if (dateDivData) {
+                capturedDateCount++;
+                if (dateDivData.available) {
+                    availableDatesList.push(dateDivData.date)
                 }
             }
         },
@@ -255,19 +305,19 @@ const isArrayEqual = (arr1, arr2) => {
 }
 
 const COOKIE_FILE_PATH = '/tmp/cookies.json';
-const loadCookiesFromFile = () => {
+const loadCookiesFromFile = async () => {
     if (!fs.existsSync(COOKIE_FILE_PATH)) {
-        return {};
+        return null;
     }
 
     const { birthtime } = fs.statSync(COOKIE_FILE_PATH)
     const now = new Date()
     if ((now - birthtime) > 1E3 * 60 * 60) { // 1 hour
-        return {};
+        return null;
     }
     console.log('Cookie file exists ' + birthtime)
 
-    return JSON.parse(fs.readFileSync(COOKIE_FILE_PATH, 'utf8'));
+    return JSON.parse(await fs.promises.readFile(COOKIE_FILE_PATH, 'utf8'));
 }
 
 const saveCookiesToFile = (cookies) => {
@@ -275,47 +325,6 @@ const saveCookiesToFile = (cookies) => {
 }
 
 const isCookiesValid = (cookies) => !(!cookies || !cookies.octofence_jslc || !cookies.octofence_jslc_fp);
-
-const prepareCookieAndSolveChallenge = async () => {
-    let cookies = loadCookiesFromFile();
-
-    if (!isCookiesValid(cookies)) {
-        let scriptContent;
-        for (let i = 2; i >= 0; i--) {
-            try {
-                scriptContent = await catchChallengeScript();
-                if (scriptContent === true) {
-                    console.log('passed without challenge');
-                    break;
-                } else if (!scriptContent) {
-                    throw new Error('Empty script');
-                }
-
-                console.log("Solving challenge. Script length: " + scriptContent.length)
-                cookies = solveChallenge(scriptContent)
-                console.log(cookies)
-                if (!isCookiesValid(cookies)) {
-                    throw new Error('Invalid solving');
-                }
-
-                break;
-            } catch (e) {
-                console.log(e);
-                if (i === 0) {
-                    throw e;
-                }
-            }
-        }
-    }
-
-    saveCookiesToFile(cookies);
-
-    headers.Cookie = '';
-    for (const cookieName in cookies) {
-        headers.Cookie += `${cookieName}=${cookies[cookieName]};`
-    }
-
-}
 
 const checkTypeDateAvailable = async (type, previousAvailablePerType) => {
     if (!URLs[type]) {
@@ -338,10 +347,12 @@ const checkTypeDateAvailable = async (type, previousAvailablePerType) => {
 
 module.exports.check = async (event) => {
     try {
+        lastSolvingChallengePromise = null;
+
         const [previousAvailableDates] = await Promise.all([
             readStateFromS3(),
             sendHealthCheck(SIGNAL_START),
-            prepareCookieAndSolveChallenge(),
+            loadCookiesFromFile().then(cookies => cookies && setCookieHeader(cookies)),
         ]);
 
         const newAvailableDates = {};
@@ -349,8 +360,6 @@ module.exports.check = async (event) => {
         for (const ticketType in URLs) {
             newAvailableDates[ticketType] = checkTypeDateAvailable(ticketType, previousAvailableDates[ticketType])
         }
-
-        await Promise.all(Object.values(newAvailableDates));
 
         let hasChanges = false;
         for (const ticketType in newAvailableDates) {
