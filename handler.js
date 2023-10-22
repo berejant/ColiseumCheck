@@ -63,6 +63,14 @@ const catchChallengeScript = async () => {
     })
     clearTimeout(id);
 
+    let octofenceJsFunction = response.headers.get('X-Octofence-Js-Function');
+    console.log('X-Octofence-Js-Function: ' + octofenceJsFunction)
+
+    if (octofenceJsFunction === 'forwarded') {
+        console.log('Passed without challenge');
+        return;
+    }
+
     let htmlContent = await response.text()
     let isScriptStarted = false;
 
