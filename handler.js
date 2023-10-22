@@ -34,6 +34,20 @@ const SIGNAL_SUCCESS = 3;
 
 const BUCKET = process.env.BUCKET;
 
+const saveHtmlToS3 = async (name, data) => {
+    const filename = `${(new Date).toISOString()}_${name}.html`;
+
+    const params = {
+        Bucket: BUCKET,
+        Key: `html/` + filename,
+        Body: data,
+    };
+
+    await S3.putObject(params).promise();
+
+    return filename;
+}
+
 const catchChallengeScript = async () => {
     let URL = Object.values(URLs)[0];
 
@@ -72,7 +86,8 @@ const catchChallengeScript = async () => {
     parser.parseComplete(htmlContent);
 
     if (scriptContent.length < 100) {
-        throw new Error('Script not found');
+        const logFilename = saveHtmlToS3('challenge-no-script', htmlContent);
+        throw new Error('Script not found. Saved html to ' + logFilename);
     }
 
     return scriptContent;
@@ -105,9 +120,11 @@ const catchDates = async (URL) => {
         },
     });
 
-    parser.parseComplete(await response.text());
+    let htmlContent = await response.text()
+    parser.parseComplete(htmlContent);
     if (capturedDateCount < 14) {
-        throw new Error('No dates available');
+        const logFilename = saveHtmlToS3('dates', htmlContent);
+        throw new Error('No dates available. Saved html to ' + logFilename);
     }
 
     return availableDatesList;
@@ -306,6 +323,8 @@ module.exports.check = async (event) => {
         for (const ticketType in URLs) {
             newAvailableDates[ticketType] = checkTypeDateAvailable(ticketType, previousAvailableDates[ticketType])
         }
+
+        await Promise.all(Object.values(newAvailableDates));
 
         let hasChanges = false;
         for (const ticketType in newAvailableDates) {
