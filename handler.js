@@ -98,7 +98,7 @@ const catchChallengeScript = async () => {
 
     parser.parseComplete(htmlContent);
 
-    if (scriptContent.length < 100) {
+    if (!scriptContent || scriptContent.length < 100) {
         const logFilename = await saveHtmlToS3('challenge-no-script', htmlContent);
         throw new Error('Script not found. Saved html to ' + logFilename);
     }
@@ -284,7 +284,8 @@ const prepareCookieAndSolveChallenge = async () => {
         for (let i = 2; i >= 0; i--) {
             try {
                 scriptContent = await catchChallengeScript();
-                console.log("Solving challenge. Script length: " + scriptContent.length)
+                let length = typeof scriptContent === 'string' ? scriptContent.length : 'null';
+                console.log("Solving challenge. Script length: " + length)
                 cookies = solveChallenge(scriptContent)
                 console.log(cookies)
                 if (!isCookiesValid(cookies)) {
