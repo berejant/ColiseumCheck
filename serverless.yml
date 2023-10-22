@@ -98,7 +98,7 @@ functions:
 #    NOTE: Please make sure to change your handler code to work with those events
 #    Check the event documentation for details
     events:
-      - schedule: rate(3 minutes)
+      - schedule: rate(1 minute)
 
 #    Define function environment variables here
     environment:
