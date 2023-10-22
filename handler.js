@@ -68,7 +68,7 @@ const catchChallengeScript = async () => {
 
     if (octofenceJsFunction === 'forwarded') {
         console.log('Passed without challenge');
-        return;
+        return true;
     }
 
     let htmlContent = await response.text()
@@ -284,8 +284,14 @@ const prepareCookieAndSolveChallenge = async () => {
         for (let i = 2; i >= 0; i--) {
             try {
                 scriptContent = await catchChallengeScript();
-                let length = typeof scriptContent === 'string' ? scriptContent.length : 'null';
-                console.log("Solving challenge. Script length: " + length)
+                if (scriptContent === true) {
+                    console.log('passed without challenge');
+                    break;
+                } else if (!scriptContent) {
+                    throw new Error('Empty script');
+                }
+
+                console.log("Solving challenge. Script length: " + scriptContent.length)
                 cookies = solveChallenge(scriptContent)
                 console.log(cookies)
                 if (!isCookiesValid(cookies)) {
