@@ -91,7 +91,7 @@ const catchChallengeScript = async () => {
     parser.parseComplete(htmlContent);
 
     if (scriptContent.length < 100) {
-        const logFilename = saveHtmlToS3('challenge-no-script', htmlContent);
+        const logFilename = await saveHtmlToS3('challenge-no-script', htmlContent);
         throw new Error('Script not found. Saved html to ' + logFilename);
     }
 
@@ -133,7 +133,7 @@ const catchDates = async (URL) => {
     let htmlContent = await response.text()
     parser.parseComplete(htmlContent);
     if (capturedDateCount < 14) {
-        const logFilename = saveHtmlToS3('dates', htmlContent);
+        const logFilename = await saveHtmlToS3('dates', htmlContent);
         throw new Error('No dates available. Saved html to ' + logFilename);
     }
 
