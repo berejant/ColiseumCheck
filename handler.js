@@ -23,8 +23,8 @@ const URLs = {
 }
 
 const timeURLs= {
-    'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&type=1&date_req=' + targetDate + '&dispoonly=0&lang=en',
-    'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&type=1&date_req=' + targetDate + '&dispoonly=0&lang=en',
+    'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&type=1&date_req=' + targetDate + '&dispoonly=1&lang=en',
+    'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&type=1&date_req=' + targetDate + '&dispoonly=1&lang=en',
 }
 
 const headers = {
@@ -220,22 +220,6 @@ const catchDates = async (URL) => {
 
 
 const catchTimes = async (URL) => {
-    let response = await fetchWithSolveChallenge(URL);
-
-    /*
-    <div class="perf_row even row-height2 text-center">
-        <div class='col-md-4 col-sm-4 col-xs-4'>
-                <div>08:40</div>
-                <div class="upspacer10"> </div>
-        </div>
-            <div class='col-md-8 col-sm-8 col-xs-8 nopadding'>
-            <button href="#" class="btn-modalproduct btn btn-success btn-block  showPerformance" data-performanceid="A7C12AEE-88CD-B502-5407-018B1E2FA2E6">
-               Available  <span class="brfrmnc-remaining"> (83) </span>
-            </button>
-        </div>
-    </div>
-     */
-
     const availableTimesListWithRemaining = [];
     let capturedTimeCount = 0;
 
@@ -253,7 +237,7 @@ const catchTimes = async (URL) => {
     const isTimeRegex = /^\d\d:\d\d$/;
 
     const parser = new htmlparser2.Parser({
-        onopentag: function(name, attribs) {
+        onopentag: function (name, attribs) {
             if (attribs['data-displaydate'] && !actualDataDisplayDate) {
                 actualDataDisplayDate = attribs['data-displaydate'];
             }
@@ -275,7 +259,7 @@ const catchTimes = async (URL) => {
             }
         },
 
-        ontext: function(text) {
+        ontext: function (text) {
             text = text.trim();
 
 
@@ -321,14 +305,45 @@ const catchTimes = async (URL) => {
         }
     });
 
-    let htmlContent = await response.text()
-    parser.parseComplete(htmlContent);
+    let isLastPage = false;
+    let nextPage = 0;
+    while (!isLastPage) {
+        nextPage++;
+        let pageURL = URL + '&page=' + nextPage;
 
-    const isValidPage = capturedTimeCount && (new Date(actualDataDisplayDate) - targetDateObject) === 0;
+        let response = await fetchWithSolveChallenge(pageURL);
 
-    if (!isValidPage) {
-        const logFilename = await saveHtmlToS3('times', htmlContent);
-        throw new Error('No times available . Saved html to ' + logFilename);
+        /*
+        <div class="perf_row even row-height2 text-center">
+            <div class='col-md-4 col-sm-4 col-xs-4'>
+                    <div>08:40</div>
+                    <div class="upspacer10"> </div>
+            </div>
+                <div class='col-md-8 col-sm-8 col-xs-8 nopadding'>
+                <button href="#" class="btn-modalproduct btn btn-success btn-block  showPerformance" data-performanceid="A7C12AEE-88CD-B502-5407-018B1E2FA2E6">
+                   Available  <span class="brfrmnc-remaining"> (83) </span>
+                </button>
+            </div>
+        </div>
+         */
+
+        let htmlContent = await response.text()
+
+        if (htmlContent.includes('No Result for the day requested!')) {
+            const logFilename = await saveHtmlToS3('times_last_page_' + nextPage.toString(), htmlContent);
+            console.log('No more pages. Saved html to ' + logFilename)
+            isLastPage = false;
+            break;
+        }
+
+        parser.parseComplete(htmlContent);
+
+        const isValidPage = capturedTimeCount && (new Date(actualDataDisplayDate) - targetDateObject) === 0;
+
+        if (!isValidPage) {
+            const logFilename = await saveHtmlToS3('times', htmlContent);
+            throw new Error('No times available . Saved html to ' + logFilename);
+        }
     }
 
     return availableTimesListWithRemaining
