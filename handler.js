@@ -236,7 +236,7 @@ const catchTimes = async (URL) => {
     </div>
      */
 
-    const availableTimesList = [];
+    const availableTimesListWithRemaining = [];
     let capturedTimeCount = 0;
 
     let isTimeDivStarted = false;
@@ -307,7 +307,7 @@ const catchTimes = async (URL) => {
             if (isTimeDivStarted && divLevelCount === 0) {
                 capturedTimeCount++;
                 if (currentAvailable) {
-                    availableTimesList.push({
+                    availableTimesListWithRemaining.push({
                         time: currentTime,
                         remaining: remainingCount,
                     });
@@ -331,7 +331,9 @@ const catchTimes = async (URL) => {
         throw new Error('No times available . Saved html to ' + logFilename);
     }
 
-    return availableTimesList;
+    return availableTimesListWithRemaining
+        .filter(time => time.remaining >= 2)
+        .map(time => time.time);
 }
 
 
@@ -512,9 +514,7 @@ const checkTypeTimeAvailable = async (type, previousAvailablePerType) => {
         newAvailablePerType.hasChanges = true;
         console.log('Changes in time detected');
 
-        const timeString = newAvailablePerType.map(time => `${time.time} (${time.remaining})`).join(', ');
-
-        await sendToTelegram(`${type} ticket - available times: ${timeString}`);
+        await sendToTelegram(`${type} ticket - available times: ${newAvailablePerType.join(', ')}`);
     }
 
     return newAvailablePerType;
