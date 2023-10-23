@@ -13,9 +13,18 @@ const SIGNAL_SUCCESS = 3;
 
 const BUCKET = process.env.BUCKET;
 
+const targetDate = '22/11/2023';
+
+const targetDateObject = new Date(targetDate.split('/').reverse().join('-'));
+
 const URLs = {
     'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&month=11&year=2023&lang=en',
     'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&month=11&year=2023&lang=en',
+}
+
+const timeURLs= {
+    'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&type=1&date_req=' + targetDate + '&dispoonly=0&lang=en',
+    'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&type=1&date_req=' + targetDate + '&dispoonly=0&lang=en',
 }
 
 const headers = {
@@ -210,6 +219,122 @@ const catchDates = async (URL) => {
 }
 
 
+const catchTimes = async (URL) => {
+    let response = await fetchWithSolveChallenge(URL);
+
+    /*
+    <div class="perf_row even row-height2 text-center">
+        <div class='col-md-4 col-sm-4 col-xs-4'>
+                <div>08:40</div>
+                <div class="upspacer10"> </div>
+        </div>
+            <div class='col-md-8 col-sm-8 col-xs-8 nopadding'>
+            <button href="#" class="btn-modalproduct btn btn-success btn-block  showPerformance" data-performanceid="A7C12AEE-88CD-B502-5407-018B1E2FA2E6">
+               Available  <span class="brfrmnc-remaining"> (83) </span>
+            </button>
+        </div>
+    </div>
+     */
+
+    const availableTimesList = [];
+    let capturedTimeCount = 0;
+
+    let isTimeDivStarted = false;
+    let isTimeButtonStarted = false;
+    let isRemainingSpanStarted = false;
+    let divLevelCount = 0;
+
+    let currentTime = '';
+    let currentAvailable = false;
+    let remainingCount = 0;
+
+    let actualDataDisplayDate = '';
+
+    const isTimeRegex = /^\d\d:\d\d$/;
+
+    const parser = new htmlparser2.Parser({
+        onopentag: function(name, attribs) {
+            if (attribs['data-displaydate'] && !actualDataDisplayDate) {
+                actualDataDisplayDate = attribs['data-displaydate'];
+            }
+
+            const classList = (attribs.class || "").split(' ');
+            isTimeDivStarted = isTimeDivStarted || classList.includes("perf_row");
+
+
+            if (isTimeDivStarted && name === 'div') {
+                divLevelCount++;
+            }
+
+            if (isTimeDivStarted && name === 'button') {
+                isTimeButtonStarted = true;
+            }
+
+            if (isTimeButtonStarted && name === 'span') {
+                isRemainingSpanStarted = true;
+            }
+        },
+
+        ontext: function(text) {
+            text = text.trim();
+
+
+            if (isTimeDivStarted && text) {
+                if (isRemainingSpanStarted) {
+                    remainingCount = Number(text.replace(/\D/g, ''));
+                } else if (isTimeButtonStarted) {
+                    currentAvailable = currentAvailable || text === 'Available';
+
+                } else if (isTimeRegex.test(text)) {
+                    currentTime = text;
+                }
+            }
+        },
+
+        onclosetag(name) {
+            if (isTimeDivStarted && name === 'div') {
+                divLevelCount--;
+            }
+
+            if (isTimeButtonStarted && name === 'button') {
+                isTimeButtonStarted = false;
+            }
+
+            if (isRemainingSpanStarted && name === 'span') {
+                isRemainingSpanStarted = false;
+            }
+
+            if (isTimeDivStarted && divLevelCount === 0) {
+                capturedTimeCount++;
+                if (currentAvailable) {
+                    availableTimesList.push({
+                        time: currentTime,
+                        remaining: remainingCount,
+                    });
+                }
+                isTimeDivStarted = false;
+                isTimeButtonStarted = false;
+                isRemainingSpanStarted = false;
+                currentAvailable = false;
+                currentTime = '';
+            }
+        }
+    });
+
+    let htmlContent = await response.text()
+    parser.parseComplete(htmlContent);
+
+    const isValidPage = capturedTimeCount && (new Date(actualDataDisplayDate) - targetDateObject) === 0;
+
+    if (!isValidPage) {
+        const logFilename = await saveHtmlToS3('times', htmlContent);
+        throw new Error('No times available . Saved html to ' + logFilename);
+    }
+
+    return availableTimesList;
+}
+
+
 const sendHealthCheck = async (signal, postData) => {
     let signalString = '';
     if (signal === SIGNAL_SUCCESS) {
@@ -297,6 +422,14 @@ const saveStateToS3 = async (data) => {
     await S3.putObject(params).promise();
 }
 
+function deepEqual(x, y) {
+    const ok = Object.keys, tx = typeof x, ty = typeof y;
+    return x && y && tx === 'object' && tx === ty ? (
+        ok(x).length === ok(y).length &&
+        ok(x).every(key => deepEqual(x[key], y[key]))
+    ) : (x === y);
+}
+
 const isArrayEqual = (arr1, arr2) => {
     if (!Array.isArray(arr1) || !Array.isArray(arr2)) {
         return false;
@@ -307,6 +440,16 @@ const isArrayEqual = (arr1, arr2) => {
     }
 
     for (const i in arr1) {
+        if (arr1[i] === arr2[i]) {
+            continue;
+        }
+
+        if (typeof arr1[i] === 'object') {
+            if (!deepEqual(arr1[i], arr2[i])) {
+                return false;
+            }
+        }
+
         if (arr1[i] !== arr2[i]) {
             return false;
         }
@@ -345,12 +488,33 @@ const checkTypeDateAvailable = async (type, previousAvailablePerType) => {
     const newAvailablePerType = await catchDates(URLs[type]);
 
     if (isArrayEqual(previousAvailablePerType, newAvailablePerType)) {
-        console.log('No changes');
+        console.log('No changes in dates');
     } else {
         newAvailablePerType.hasChanges = true;
-        console.log('Changes detected');
+        console.log('Changes detected in dates');
 
         await sendToTelegram(`${type} ticket - available dates: ${newAvailablePerType.join(', ')}`);
+    }
+
+    return newAvailablePerType;
+}
+
+const checkTypeTimeAvailable = async (type, previousAvailablePerType) => {
+    if (!URLs[type]) {
+        throw new Error('Unknown type');
+    }
+
+    const newAvailablePerType = await catchTimes(timeURLs[type]);
+
+    if (isArrayEqual(previousAvailablePerType, newAvailablePerType)) {
+        console.log('No changes inm time');
+    } else {
+        newAvailablePerType.hasChanges = true;
+        console.log('Changes in time detected');
+
+        const timeString = newAvailablePerType.map(time => `${time.time} (${time.remaining})`).join(', ');
+
+        await sendToTelegram(`${type} ticket - available times: ${timeString}`);
     }
 
     return newAvailablePerType;
@@ -372,10 +536,17 @@ module.exports.check = async (event) => {
             newAvailableDates[ticketType] = checkTypeDateAvailable(ticketType, previousAvailableDates[ticketType])
         }
 
+        for (const ticketType in timeURLs) {
+            const key = ticketType + 'Time';
+            newAvailableDates[key] = checkTypeTimeAvailable(ticketType, previousAvailableDates[key])
+        }
+
         let hasChanges = false;
         for (const ticketType in newAvailableDates) {
             newAvailableDates[ticketType] = await newAvailableDates[ticketType];
             hasChanges = hasChanges || newAvailableDates[ticketType].hasChanges || false;
+
+            delete newAvailableDates[ticketType].hasChanges;
         }
 
         console.log('Saving state, changes: ', hasChanges)
