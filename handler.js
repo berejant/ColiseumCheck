@@ -19,11 +19,13 @@ const targetDateObject = new Date(targetDate.split('/').reverse().join('-'));
 
 const URLs = {
     'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&month=11&year=2023&lang=en',
+    'arena': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=3C38AB77-8D5A-5394-05B2-0172EB8E7D46&month=11&year=2023&lang=en',
     'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getEventsCalendar&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&month=11&year=2023&lang=en',
 }
 
 const timeURLs= {
     'full': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=D7E12B2E-46C4-074B-5FC5-016ED579426D&type=1&date_req=' + targetDate + '&dispoonly=1&lang=en',
+    'arena': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=3C38AB77-8D5A-5394-05B2-0172EB8E7D46&type=1&date_req=' + targetDate + '&dispoonly=1&lang=en',
     'simple': 'https://ecm.coopculture.it/index.php?option=com_snapp&task=event.getperformancelist&format=raw&id=3793660E-5E3F-9172-2F89-016CB3FAD609&type=1&date_req=' + targetDate + '&dispoonly=1&lang=en',
 }
 
