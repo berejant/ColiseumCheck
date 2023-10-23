@@ -11,6 +11,7 @@ concurrency:
 
 jobs:
   test:
+    if: ${{ false }}  # disable for now
     name: Deploy
     runs-on: ubuntu-latest
     steps:
