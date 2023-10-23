@@ -570,7 +570,7 @@ module.exports.check = async (event) => {
 
         console.log('Saving state, changes: ', hasChanges)
         await Promise.all([
-            saveStateToS3(newAvailableDates),
+            hasChanges ? saveStateToS3(newAvailableDates) : null, // save only if changes to avoid unnecessary S3 calls and costs
             sendHealthCheck(SIGNAL_SUCCESS, {
                 message: hasChanges ? 'Changes detected' : 'No changes',
                 newAvailableDates: newAvailableDates,
